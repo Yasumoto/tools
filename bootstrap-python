@@ -1,0 +1,107 @@
+#!/bin/sh
+
+#/ Usage: boostrap-python [--wipe]
+#/   --wipe Remove the associated directories for python in this repo
+
+set -e
+
+PIP_VERSION="9.0.1"
+SETUPTOOLS_VERSION="20.10.1"
+
+usage() {
+    grep "^#/" "$0" | cut -c"4-" >&2
+    exit "$1"
+}
+
+while [ "$#" -gt 0 ]
+do
+    case "$1" in
+        -h|--help) usage 0;;
+        -w|--wipe) WIPE="--wipe" shift;;
+        -*) usage 1;;
+        *) break;;
+    esac
+done
+
+platform='unknown'
+unamestr="$(uname)"
+if [ "$unamestr" = "Linux" ]; then
+    platform='linux'
+elif [ "$unamestr" = "Darwin" ]; then
+    platform='darwin'
+else
+    echo "Could not detect platform"
+    exit 1
+fi
+
+REPO_ROOT=$(cd "$(dirname "$0")"/.. && pwd)
+
+# Always ensure the jenkins user has a pristine environment
+if [ "$USER" = "jenkinsbuilder" ]
+then WIPE="--wipe"
+fi
+
+wipe() {
+  find "${REPO_ROOT}/lib" -name "*.pyc" -exec rm {} \;
+  rm -rf "${REPO_ROOT}/.eggs"
+  rm -rf "${REPO_ROOT}/tools-*.dist-info"
+  rm -rf ~/.pex
+  rm -rf "${REPO_ROOT}/.virtualenv"
+}
+
+
+if [ "$(uname)" = "Linux" ] && ! which 'python2.7-config' > /dev/null  # on macOS it is not needed
+then
+    echo 'Please install python2.7-dev package!' 1>&2
+    exit 1
+fi
+
+if [ "$(uname)" = "Linux" ] && ! which 'pip' > /dev/null # on macOS it is not needed
+then
+    echo 'Please install python-pip package!' 1>&2
+    exit 1
+fi
+
+if [ -n "${PYTHONPATH}" ]
+then
+  echo "Warning- you have PYTHONPATH set and want to unset it: ${PYTHONPATH}"
+fi
+
+if ! which 'virtualenv' >/dev/null
+then
+    pip install virtualenv
+fi
+
+if [ "${WIPE}" = "--wipe" ]
+then
+  wipe
+fi
+
+BOOTSTRAP_FILE="${REPO_ROOT}/.virtualenv/BOOTSTRAPPED"
+BOOTSTRAP_NEEDED=1
+if [ ! -f "${BOOTSTRAP_FILE}" ]; then
+    BOOTSTRAP_NEEDED=0
+else
+    case "$platform" in
+        darwin) STATCMD="stat -f%a" ;;
+        linux) STATCMD="stat --format=%Z"
+    esac
+    SETUP_DATE=$($STATCMD "${REPO_ROOT}/setup.py")
+    BOOTSTRAP_DATE=$($STATCMD "${BOOTSTRAP_FILE}")
+    if [ "${SETUP_DATE}" -gt "${BOOTSTRAP_DATE}" ]; then
+        BOOTSTRAP_NEEDED=0
+    fi
+fi
+
+if [ $BOOTSTRAP_NEEDED -eq 0 ]; then
+    echo Bootstrapping virtualenv
+    virtualenv "${REPO_ROOT}/.virtualenv"
+    # shellcheck source=/dev/null
+    . "${REPO_ROOT}/.virtualenv/bin/activate"
+    # Ensure we keep up with security updates
+    pip install pip=="${PIP_VERSION}"
+    # The version of setuptools on opsN machines is too old.
+    pip install setuptools=="${SETUPTOOLS_VERSION}"
+    (cd "${REPO_ROOT}"; "${REPO_ROOT}/.virtualenv/bin/python2.7" setup.py develop)
+    echo 'yup' > "${REPO_ROOT}/.virtualenv/BOOTSTRAPPED"
+fi

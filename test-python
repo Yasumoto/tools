@@ -1,0 +1,48 @@
+#!/bin/sh
+
+#/ Usage: test-python [--wipe] [--plain]
+#/   --wipe Remove the associated directories and pyc for python in this repo
+#/   --plain Use simple pylint output, ideal for tools such as Jenkins
+
+set -x
+
+echo "test-python: beginning execution" >&2
+
+WIPE=""
+# General Syntax Errors and Formatting
+PYLINT="pylint"
+# In-depth Docstring best practices
+PYDOCSTYLE="pydocstyle"
+
+usage() {
+    grep "^#/" "$0" | cut -c"4-" >&2
+    exit "$1"
+}
+while [ "$#" -gt 0 ]
+do
+    case "$1" in
+        -h|--help) usage 0;;
+        -w|--wipe) WIPE="--wipe" shift;;
+        -p|--plain) PYLINT="${PYLINT} --output-format=text" shift;;
+        -s|--skip-pylint) SKIP_PYLINT="false" shift;;
+        -*) usage 1;;
+        *) break;;
+    esac
+done
+
+PYLIN="${PYLINT} ./lib/tools ./lib/tests"
+PYDOCSTYLE="${PYDOCSTYLE} ./lib/tools"
+
+REPO_ROOT=$(cd "$(dirname "$0")"/.. && pwd)
+
+"${REPO_ROOT}/bin/bootstrap-python" "${WIPE}"
+# shellcheck source=/dev/null
+. "${REPO_ROOT}/.virtualenv/bin/activate"
+
+if [ "$SKIP_PYLINT" != "false" ]
+then
+  $PYLINT
+  $PYDOCSTYLE
+fi
+
+python2.7 ./setup.py test
